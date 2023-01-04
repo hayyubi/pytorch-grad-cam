@@ -5,14 +5,16 @@ from pytorch_grad_cam.utils.svd_on_activations import get_2d_projection
 
 class HiResCAM(BaseCAM):
     def __init__(self, model, target_layers, use_cuda=False,
-                 reshape_transform=None):
+                 reshape_transform=None, input_dict_key=None, out_dict_key=None):
         super(
             HiResCAM,
             self).__init__(
             model,
             target_layers,
             use_cuda,
-            reshape_transform)
+            reshape_transform,
+            input_dict_key=input_dict_key,
+            out_dict_key=out_dict_key)
 
     def get_cam_image(self,
                       input_tensor,

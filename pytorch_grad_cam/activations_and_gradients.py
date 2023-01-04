@@ -2,11 +2,12 @@ class ActivationsAndGradients:
     """ Class for extracting activations and
     registering gradients from targetted intermediate layers """
 
-    def __init__(self, model, target_layers, reshape_transform):
+    def __init__(self, model, target_layers, reshape_transform, out_dict_key):
         self.model = model
         self.gradients = []
         self.activations = []
         self.reshape_transform = reshape_transform
+        self.out_dict_key = out_dict_key
         self.handles = []
         for target_layer in target_layers:
             self.handles.append(
@@ -39,7 +40,15 @@ class ActivationsAndGradients:
     def __call__(self, x):
         self.gradients = []
         self.activations = []
-        return self.model(x)
+        if isinstance(x, dict):
+            model_comp_out = self.model(**x)
+        else:
+            model_comp_out = self.model(x)
+
+        model_cam_out = model_comp_out
+        if self.out_dict_key:
+            model_cam_out = model_comp_out[self.out_dict_key]
+        return model_comp_out, model_cam_out
 
     def release(self):
         for handle in self.handles:

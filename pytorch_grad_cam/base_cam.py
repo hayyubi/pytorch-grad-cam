@@ -15,7 +15,10 @@ class BaseCAM:
                  use_cuda: bool = False,
                  reshape_transform: Callable = None,
                  compute_input_gradient: bool = False,
-                 uses_gradients: bool = True) -> None:
+                 uses_gradients: bool = True,
+                 input_dict_key: str = None,
+                 out_dict_key: str = None) -> None:
+        self.input_dict_key = input_dict_key
         self.model = model.eval()
         self.target_layers = target_layers
         self.cuda = use_cuda
@@ -25,7 +28,7 @@ class BaseCAM:
         self.compute_input_gradient = compute_input_gradient
         self.uses_gradients = uses_gradients
         self.activations_and_grads = ActivationsAndGradients(
-            self.model, target_layers, reshape_transform)
+            self.model, target_layers, reshape_transform, out_dict_key)
 
     """ Get a vector of weights for every channel in the target layer.
         Methods that return weights channels,
@@ -65,22 +68,31 @@ class BaseCAM:
                 eigen_smooth: bool = False) -> np.ndarray:
 
         if self.cuda:
-            input_tensor = input_tensor.cuda()
+            if not isinstance(input_tensor, dict):
+                input_tensor = input_tensor.cuda()
+            else:
+                input_tensor = {k:v.cuda() for k, v in input_tensor.items() if torch.is_tensor(v)}
 
         if self.compute_input_gradient:
-            input_tensor = torch.autograd.Variable(input_tensor,
+            if not isinstance(input_tensor, dict):
+                input_tensor = torch.autograd.Variable(input_tensor,
                                                    requires_grad=True)
+            else:
+                image_tensor = input_tensor[self.input_dict_key]
+                image_tensor = torch.autograd.Variable(image_tensor,
+                                                   requires_grad=True)
+                input_tensor[self.input_dict_key] = image_tensor
 
-        outputs = self.activations_and_grads(input_tensor)
+        outputs, cam_outputs = self.activations_and_grads(input_tensor)
         if targets is None:
-            target_categories = np.argmax(outputs.cpu().data.numpy(), axis=-1)
+            target_categories = np.argmax(cam_outputs.cpu().data.numpy(), axis=-1)
             targets = [ClassifierOutputTarget(
                 category) for category in target_categories]
 
         if self.uses_gradients:
             self.model.zero_grad()
             loss = sum([target(output)
-                       for target, output in zip(targets, outputs)])
+                       for target, output in zip(targets, cam_outputs)])
             loss.backward(retain_graph=True)
 
         # In most of the saliency attribution papers, the saliency is
@@ -95,10 +107,12 @@ class BaseCAM:
         cam_per_layer = self.compute_cam_per_layer(input_tensor,
                                                    targets,
                                                    eigen_smooth)
-        return self.aggregate_multi_layers(cam_per_layer)
+        return outputs, self.aggregate_multi_layers(cam_per_layer)
 
     def get_target_width_height(self,
                                 input_tensor: torch.Tensor) -> Tuple[int, int]:
+        if isinstance(input_tensor, dict):
+            input_tensor = input_tensor[self.input_dict_key]
         width, height = input_tensor.size(-1), input_tensor.size(-2)
         return width, height
 
@@ -156,7 +170,14 @@ class BaseCAM:
         )
         cams = []
         for transform in transforms:
-            augmented_tensor = transform.augment_image(input_tensor)
+            if not isinstance(input_tensor, dict):
+                augmented_tensor = transform.augment_image(input_tensor)
+            else:
+                image_tensor = input_tensor[self.input_dict_key]
+                augmented_image_tensor = transform.augment_image(image_tensor)
+                input_tensor[self.input_dict_key] = augmented_image_tensor
+                augmented_tensor = input_tensor
+
             cam = self.forward(augmented_tensor,
                                targets,
                                eigen_smooth)
@@ -175,12 +196,17 @@ class BaseCAM:
         return cam
 
     def __call__(self,
-                 input_tensor: torch.Tensor,
+                 input_tensor: torch.Tensor = None,
                  targets: List[torch.nn.Module] = None,
                  aug_smooth: bool = False,
-                 eigen_smooth: bool = False) -> np.ndarray:
+                 eigen_smooth: bool = False,
+                 **kwargs) -> np.ndarray:
 
         # Smooth the CAM result with test time augmentation
+        if input_tensor is None:
+            input_tensor = kwargs
+        assert input_tensor is not None, 'Please provide input'
+
         if aug_smooth is True:
             return self.forward_augmentation_smoothing(
                 input_tensor, targets, eigen_smooth)

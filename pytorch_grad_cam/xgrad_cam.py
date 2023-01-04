@@ -8,14 +8,18 @@ class XGradCAM(BaseCAM):
             model,
             target_layers,
             use_cuda=False,
-            reshape_transform=None):
+            reshape_transform=None,
+            input_dict_key: str = None,
+            out_dict_key=None):
         super(
             XGradCAM,
             self).__init__(
             model,
             target_layers,
             use_cuda,
-            reshape_transform)
+            reshape_transform,
+            input_dict_key=input_dict_key,
+            out_dict_key=out_dict_key)
 
     def get_cam_weights(self,
                         input_tensor,
